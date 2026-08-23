@@ -291,19 +291,7 @@ def run_data_agent(
         f"{result.data_quality.end_date}"
     )
 
-    # ========================================================
-    # STRUCTURED DATA
-    # ========================================================
-
-    print("\n" + "=" * 60)
-    print("DATA AGENT STRUCTURED OUTPUT")
-    print("=" * 60)
-
-    print(
-        result.model_dump_json(
-            indent=2
-        )
-    )
+    
 
 
 # ============================================================
@@ -620,20 +608,7 @@ def run_technical_agent(
         "not financial advice."
     )
 
-    # ========================================================
-    # STRUCTURED JSON OUTPUT
-    # ========================================================
-
-    print("\n" + "=" * 60)
-    print("TECHNICAL AGENT STRUCTURED OUTPUT")
-    print("=" * 60)
-
-    print(
-        result.model_dump_json(
-            indent=2
-        )
-    )
-
+    
 
 # ============================================================
 # MAIN
