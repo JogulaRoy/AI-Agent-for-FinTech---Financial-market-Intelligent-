@@ -1,5 +1,6 @@
 from app.agents.data_agent import data_agent
 from app.agents.technical_agent import technical_agent
+from app.agents.news_agent import news_agent
 
 
 # ============================================================
@@ -29,7 +30,6 @@ def get_period():
     """
 
     print("\nSelect historical data period:")
-
     print("1. 1 month")
     print("2. 6 months")
     print("3. 1 year")
@@ -291,8 +291,6 @@ def run_data_agent(
         f"{result.data_quality.end_date}"
     )
 
-    
-
 
 # ============================================================
 # TECHNICAL AGENT
@@ -307,9 +305,7 @@ def run_technical_agent(
     complete technical analysis.
     """
 
-    print(
-        "\nFetching technical data..."
-    )
+    print("\nFetching technical data...")
 
     try:
 
@@ -608,7 +604,189 @@ def run_technical_agent(
         "not financial advice."
     )
 
-    
+
+# ============================================================
+# NEWS AGENT
+# ============================================================
+
+def run_news_agent(
+    user_input: str,
+):
+    """
+    Run the News Agent and display
+    human-readable financial news.
+    """
+
+    print("\nFetching recent financial news...")
+
+    try:
+
+        result = news_agent(
+            user_input=user_input,
+            hours=168,
+            limit=20,
+        )
+
+    except Exception as error:
+
+        print(
+            f"\nNews Agent Error: {error}"
+        )
+
+        return
+
+    # ========================================================
+    # COMPANY
+    # ========================================================
+
+    print("\n" + "=" * 60)
+    print("NEWS AGENT — COMPANY")
+    print("=" * 60)
+
+    print(
+        f"Name: {result.company_name}"
+    )
+
+    print(
+        f"Symbol: {result.symbol}"
+    )
+
+    print(
+        f"Exchange: {result.exchange}"
+    )
+
+    # ========================================================
+    # NEWS SUMMARY
+    # ========================================================
+
+    print("\n" + "=" * 60)
+    print("NEWS SUMMARY")
+    print("=" * 60)
+
+    print(
+        f"Articles Analyzed: "
+        f"{result.articles_analyzed}"
+    )
+
+    print(
+        f"Analysis Window: "
+        f"{result.analysis_window_hours} hours"
+    )
+
+    # ========================================================
+    # SENTIMENT
+    # ========================================================
+
+    print("\n" + "=" * 60)
+    print("NEWS SENTIMENT")
+    print("=" * 60)
+
+    sentiment = result.sentiment
+
+    print(
+        f"Overall Sentiment: "
+        f"{sentiment.overall_sentiment}"
+    )
+
+    print(
+        f"Positive News: "
+        f"{sentiment.positive_count}"
+    )
+
+    print(
+        f"Negative News: "
+        f"{sentiment.negative_count}"
+    )
+
+    print(
+        f"Neutral News: "
+        f"{sentiment.neutral_count}"
+    )
+
+    print(
+        f"Positive Ratio: "
+        f"{sentiment.positive_ratio * 100:.2f}%"
+    )
+
+    print(
+        f"Negative Ratio: "
+        f"{sentiment.negative_ratio * 100:.2f}%"
+    )
+
+    print(
+        f"Neutral Ratio: "
+        f"{sentiment.neutral_ratio * 100:.2f}%"
+    )
+
+    if (
+        sentiment.average_sentiment_score
+        is not None
+    ):
+
+        print(
+            f"Average Sentiment Score: "
+            f"{sentiment.average_sentiment_score:.4f}"
+        )
+
+    # ========================================================
+    # RECENT ARTICLES
+    # ========================================================
+
+    print("\n" + "=" * 60)
+    print("RECENT NEWS")
+    print("=" * 60)
+
+    if not result.articles:
+
+        print(
+            "No recent news articles found."
+        )
+
+        return
+
+    for index, article in enumerate(
+        result.articles[:10],
+        start=1,
+    ):
+
+        print(
+            f"\n{index}. {article.title}"
+        )
+
+        print(
+            f"   Source: "
+            f"{article.source}"
+        )
+
+        print(
+            f"   Published: "
+            f"{article.published_at}"
+        )
+
+        print(
+            f"   Sentiment: "
+            f"{article.sentiment_label}"
+        )
+
+        if article.sentiment_score is not None:
+
+            print(
+                f"   Sentiment Score: "
+                f"{article.sentiment_score:.4f}"
+            )
+
+        if article.summary:
+
+            print(
+                f"   Summary: "
+                f"{article.summary[:300]}..."
+            )
+
+        print(
+            f"   URL: "
+            f"{article.url}"
+        )
+
 
 # ============================================================
 # MAIN
@@ -616,39 +794,25 @@ def run_technical_agent(
 
 def main():
 
-    print(
-        "\n" + "=" * 60
-    )
-
-    print(
-        "FINANCIAL MARKET INTELLIGENCE"
-    )
-
-    print(
-        "=" * 60
-    )
+    print("\n" + "=" * 60)
+    print("FINANCIAL MARKET INTELLIGENCE")
+    print("=" * 60)
 
     # ========================================================
     # AGENT SELECTION
     # ========================================================
 
-    print(
-        "\nSelect an agent:"
-    )
+    print("\nSelect an agent:")
 
-    print(
-        "1. Data Agent"
-    )
-
-    print(
-        "2. Technical Agent"
-    )
+    print("1. Data Agent")
+    print("2. Technical Agent")
+    print("3. News Agent")
 
     agent_choice = input(
-        "\nEnter your choice (1-2): "
+        "\nEnter your choice (1-3): "
     ).strip()
 
-    if agent_choice not in ["1", "2"]:
+    if agent_choice not in ["1", "2", "3"]:
 
         print(
             "\nInvalid agent choice."
@@ -674,31 +838,47 @@ def main():
         return
 
     # ========================================================
-    # USER PERIOD
+    # DATA / TECHNICAL AGENTS
     # ========================================================
 
-    period = get_period()
+    if agent_choice in ["1", "2"]:
 
-    if period is None:
+        period = get_period()
 
-        return
+        if period is None:
+
+            return
+
+        # ----------------------------------------------------
+        # DATA AGENT
+        # ----------------------------------------------------
+
+        if agent_choice == "1":
+
+            run_data_agent(
+                user_input=user_input,
+                period=period,
+            )
+
+        # ----------------------------------------------------
+        # TECHNICAL AGENT
+        # ----------------------------------------------------
+
+        elif agent_choice == "2":
+
+            run_technical_agent(
+                user_input=user_input,
+                period=period,
+            )
 
     # ========================================================
-    # RUN SELECTED AGENT
+    # NEWS AGENT
     # ========================================================
 
-    if agent_choice == "1":
+    elif agent_choice == "3":
 
-        run_data_agent(
+        run_news_agent(
             user_input=user_input,
-            period=period,
-        )
-
-    elif agent_choice == "2":
-
-        run_technical_agent(
-            user_input=user_input,
-            period=period,
         )
 
 
