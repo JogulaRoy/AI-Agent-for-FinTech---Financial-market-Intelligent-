@@ -29,102 +29,237 @@ from app.schemas.market_data import (
 )
 
 
+# ============================================================
+# DATA AGENT
+# ============================================================
+
 def data_agent(
     user_input: str,
     period: str = "1y",
 ) -> MarketData:
     """
-    Data Agent for the Financial Market Intelligence system.
+    Data Agent
 
     Responsibilities:
 
-    1. Resolve user stock input.
-    2. Fetch historical market data.
-    3. Validate and clean market data.
-    4. Identify currency.
-    5. Convert market history into structured data.
-    6. Calculate historical performance.
-    7. Calculate stability metrics.
-    8. Return a JSON-compatible Pydantic object.
+    1. Resolve the user's stock dynamically.
+    2. Prefer Indian NSE/BSE equities when applicable.
+    3. Determine the correct Yahoo Finance symbol.
+    4. Fetch historical market data.
+    5. Validate and clean market data.
+    6. Identify latest price and currency.
+    7. Convert history into structured records.
+    8. Calculate performance metrics.
+    9. Calculate stability metrics.
+    10. Report data quality.
+    11. Return structured Pydantic data.
 
     The Data Agent does NOT:
-        - provide investment advice
-        - perform news analysis
+
+        - make investment decisions
+        - provide financial advice
+        - analyze news
         - perform sentiment analysis
         - calculate technical indicators
-        - perform final investment decisions
-
-    Those responsibilities belong to other agents.
+        - perform portfolio risk decisions
     """
 
-    # ============================================================
-    # 1. RESOLVE USER STOCK INPUT
-    # ============================================================
+    # ========================================================
+    # 1. VALIDATE USER INPUT
+    # ========================================================
 
     if not user_input or not user_input.strip():
+
         raise ValueError(
             "Stock name or symbol cannot be empty."
         )
 
+    user_input = user_input.strip()
+
+    # ========================================================
+    # 2. RESOLVE STOCK
+    # ========================================================
+    #
+    # Example:
+    #
+    # SBI
+    # ↓
+    # NSE Security Master
+    # ↓
+    # State Bank of India
+    # ↓
+    # SBIN
+    # ↓
+    # SBIN.NS
+    #
+    # Apple
+    # ↓
+    # International resolver
+    # ↓
+    # AAPL
+    #
+    # ========================================================
+
     stock = resolve_stock(
-        user_input.strip()
+        user_input
     )
 
-    symbol = stock["symbol"]
+    # ========================================================
+    # 3. DETERMINE DATA SYMBOL
+    # ========================================================
+    #
+    # THIS IS THE CRITICAL FIX.
+    #
+    # For Indian stocks:
+    #
+    # stock["symbol"]      = SBIN
+    # stock["yahoo_symbol"] = SBIN.NS
+    #
+    # We use yahoo_symbol for fetching.
+    #
+    # For international stocks:
+    #
+    # stock["symbol"] = AAPL
+    #
+    # No yahoo_symbol is required.
+    #
+    # ========================================================
 
-    # ============================================================
-    # 2. FETCH MARKET DATA
-    # ============================================================
+    data_symbol = stock.get(
+        "yahoo_symbol"
+    )
+
+    if not data_symbol:
+
+        data_symbol = stock["symbol"]
+
+    # ========================================================
+    # 4. FETCH MARKET DATA
+    # ========================================================
 
     market_data = fetch_market_data(
-        symbol=symbol,
+        symbol=data_symbol,
         period=period,
         interval="1d",
     )
 
     history = market_data["history"]
 
-    # ============================================================
-    # 3. STOCK INFORMATION
-    # ============================================================
+    # ========================================================
+    # 5. SAFETY CHECK
+    # ========================================================
+
+    if history is None or history.empty:
+
+        raise ValueError(
+            f"No historical market data available "
+            f"for {stock['name']} "
+            f"({data_symbol})."
+        )
+
+    # ========================================================
+    # 6. CURRENCY
+    # ========================================================
+
+    currency_code = (
+        market_data[
+            "currency"
+        ][
+            "code"
+        ]
+    )
+
+    currency_symbol = (
+        market_data[
+            "currency"
+        ][
+            "symbol"
+        ]
+    )
+
+    # ========================================================
+    # 7. STOCK INFORMATION
+    # ========================================================
+    #
+    # IMPORTANT:
+    #
+    # Display the user's actual market identity:
+    #
+    # State Bank of India
+    # SBIN
+    # NSE
+    # INR
+    #
+    # Do NOT display SBIN.NS as the stock's public symbol.
+    #
+    # SBIN.NS is only the Yahoo Finance data symbol.
+    #
+    # ========================================================
 
     stock_info = StockInfo(
         name=stock["name"],
         symbol=stock["symbol"],
         exchange=stock["exchange"],
-        currency=market_data[
-            "currency"
-        ]["code"],
+        currency=currency_code,
     )
 
-    # ============================================================
-    # 4. LATEST PRICE
-    # ============================================================
+    # ========================================================
+    # 8. LATEST PRICE
+    # ========================================================
+
+    latest_price = float(
+        market_data[
+            "latest_price"
+        ]
+    )
 
     price_info = PriceInfo(
-        value=market_data[
-            "latest_price"
-        ],
-
-        currency=market_data[
-            "currency"
-        ]["code"],
-
-        symbol=market_data[
-            "currency"
-        ]["symbol"],
+        value=latest_price,
+        currency=currency_code,
+        symbol=currency_symbol,
     )
 
-    # ============================================================
-    # 5. CONVERT HISTORY TO JSON-COMPATIBLE STRUCTURE
-    # ============================================================
+    # ========================================================
+    # 9. CONVERT HISTORY
+    # ========================================================
 
     historical_data = []
 
     for date, row in history.iterrows():
 
+        # ----------------------------------------------------
+        # Volume safety
+        # ----------------------------------------------------
+
+        volume = row.get(
+            "Volume",
+            0,
+        )
+
+        if volume is None:
+
+            volume = 0
+
+        try:
+
+            volume = int(
+                volume
+            )
+
+        except (
+            TypeError,
+            ValueError,
+        ):
+
+            volume = 0
+
+        # ----------------------------------------------------
+        # Create structured record
+        # ----------------------------------------------------
+
         historical_data.append(
             HistoricalPrice(
+
                 date=date.strftime(
                     "%Y-%m-%d"
                 ),
@@ -145,15 +280,13 @@ def data_agent(
                     row["Close"]
                 ),
 
-                volume=int(
-                    row["Volume"]
-                ),
+                volume=volume,
             )
         )
 
-    # ============================================================
-    # 6. PERFORMANCE ANALYSIS
-    # ============================================================
+    # ========================================================
+    # 10. PERFORMANCE METRICS
+    # ========================================================
 
     daily_return = (
         calculate_daily_return(
@@ -190,9 +323,9 @@ def data_agent(
         one_year_return=one_year_return,
     )
 
-    # ============================================================
-    # 7. STABILITY ANALYSIS
-    # ============================================================
+    # ========================================================
+    # 11. STABILITY METRICS
+    # ========================================================
 
     annualized_volatility = (
         calculate_annualized_volatility(
@@ -280,35 +413,59 @@ def data_agent(
         ),
     )
 
-    # ============================================================
-    # 8. DATA QUALITY
-    # ============================================================
+    # ========================================================
+    # 12. DATA QUALITY
+    # ========================================================
 
-    quality = market_data[
+    quality = market_data.get(
         "data_quality"
-    ]
-
-    data_quality = DataQuality(
-        rows_returned=quality[
-            "rows_returned"
-        ],
-
-        rows_removed=quality[
-            "rows_removed"
-        ],
-
-        start_date=quality[
-            "start_date"
-        ],
-
-        end_date=quality[
-            "end_date"
-        ],
     )
 
-    # ============================================================
-    # 9. RETURN COMPLETE DATA AGENT RESULT
-    # ============================================================
+    if quality is None:
+
+        data_quality = DataQuality(
+
+            rows_returned=len(
+                history
+            ),
+
+            rows_removed=0,
+
+            start_date=(
+                history.index[0]
+                .strftime("%Y-%m-%d")
+            ),
+
+            end_date=(
+                history.index[-1]
+                .strftime("%Y-%m-%d")
+            ),
+        )
+
+    else:
+
+        data_quality = DataQuality(
+
+            rows_returned=quality[
+                "rows_returned"
+            ],
+
+            rows_removed=quality[
+                "rows_removed"
+            ],
+
+            start_date=quality[
+                "start_date"
+            ],
+
+            end_date=quality[
+                "end_date"
+            ],
+        )
+
+    # ========================================================
+    # 13. RETURN COMPLETE DATA AGENT RESULT
+    # ========================================================
 
     return MarketData(
 

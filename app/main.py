@@ -1,6 +1,7 @@
 from app.agents.data_agent import data_agent
 from app.agents.technical_agent import technical_agent
 from app.agents.news_agent import news_agent
+from app.agents.risk_agent import risk_agent
 
 
 # ============================================================
@@ -25,11 +26,9 @@ CURRENCY_SYMBOLS = {
 # ============================================================
 
 def get_period():
-    """
-    Get historical analysis period from the user.
-    """
 
     print("\nSelect historical data period:")
+
     print("1. 1 month")
     print("2. 6 months")
     print("3. 1 year")
@@ -50,10 +49,16 @@ def get_period():
         "6": "max",
     }
 
-    period = period_map.get(period_choice)
+    period = period_map.get(
+        period_choice
+    )
 
     if period is None:
-        print("\nInvalid period choice.")
+
+        print(
+            "\nInvalid period choice."
+        )
+
         return None
 
     return period
@@ -67,9 +72,6 @@ def run_data_agent(
     user_input: str,
     period: str,
 ):
-    """
-    Run the Data Agent and display its result.
-    """
 
     print("\nFetching market data...")
 
@@ -88,9 +90,10 @@ def run_data_agent(
 
         return
 
-    # ========================================================
-    # STOCK INFORMATION
-    # ========================================================
+    currency_symbol = CURRENCY_SYMBOLS.get(
+        result.price.currency,
+        result.price.currency,
+    )
 
     print("\n" + "=" * 60)
     print("DATA AGENT — STOCK INFORMATION")
@@ -112,15 +115,6 @@ def run_data_agent(
         f"Currency: {result.stock.currency}"
     )
 
-    # ========================================================
-    # LATEST PRICE
-    # ========================================================
-
-    currency_symbol = CURRENCY_SYMBOLS.get(
-        result.price.currency,
-        result.price.currency,
-    )
-
     print("\n" + "=" * 60)
     print("LATEST PRICE")
     print("=" * 60)
@@ -130,71 +124,45 @@ def run_data_agent(
         f"{result.price.value:,.2f}"
     )
 
-    # ========================================================
-    # PERFORMANCE
-    # ========================================================
-
     print("\n" + "=" * 60)
     print("PERFORMANCE")
     print("=" * 60)
 
     performance = result.performance
 
-    if performance.daily_return is not None:
+    metrics = [
+        (
+            "Daily Return",
+            performance.daily_return,
+        ),
+        (
+            "Monthly Return",
+            performance.monthly_return,
+        ),
+        (
+            "6-Month Return",
+            performance.six_month_return,
+        ),
+        (
+            "1-Year Return",
+            performance.one_year_return,
+        ),
+    ]
 
-        print(
-            f"Daily Return: "
-            f"{performance.daily_return * 100:.2f}%"
-        )
+    for name, value in metrics:
 
-    else:
+        if value is not None:
 
-        print(
-            "Daily Return: Not available"
-        )
+            print(
+                f"{name}: "
+                f"{value * 100:.2f}%"
+            )
 
-    if performance.monthly_return is not None:
+        else:
 
-        print(
-            f"Monthly Return: "
-            f"{performance.monthly_return * 100:.2f}%"
-        )
-
-    else:
-
-        print(
-            "Monthly Return: Not available"
-        )
-
-    if performance.six_month_return is not None:
-
-        print(
-            f"6-Month Return: "
-            f"{performance.six_month_return * 100:.2f}%"
-        )
-
-    else:
-
-        print(
-            "6-Month Return: Not available"
-        )
-
-    if performance.one_year_return is not None:
-
-        print(
-            f"1-Year Return: "
-            f"{performance.one_year_return * 100:.2f}%"
-        )
-
-    else:
-
-        print(
-            "1-Year Return: Not available"
-        )
-
-    # ========================================================
-    # STABILITY
-    # ========================================================
+            print(
+                f"{name}: Not available"
+            )
 
     print("\n" + "=" * 60)
     print("STABILITY ANALYSIS")
@@ -263,10 +231,6 @@ def run_data_agent(
         f"{stability.classification}"
     )
 
-    # ========================================================
-    # DATA QUALITY
-    # ========================================================
-
     print("\n" + "=" * 60)
     print("DATA QUALITY")
     print("=" * 60)
@@ -300,10 +264,6 @@ def run_technical_agent(
     user_input: str,
     period: str,
 ):
-    """
-    Run the Technical Agent and display
-    complete technical analysis.
-    """
 
     print("\nFetching technical data...")
 
@@ -327,10 +287,6 @@ def run_technical_agent(
         result.currency,
     )
 
-    # ========================================================
-    # STOCK INFORMATION
-    # ========================================================
-
     print("\n" + "=" * 60)
     print("TECHNICAL AGENT — STOCK INFORMATION")
     print("=" * 60)
@@ -349,89 +305,33 @@ def run_technical_agent(
         f"{result.current_price:,.2f}"
     )
 
-    # ========================================================
-    # MOVING AVERAGES
-    # ========================================================
-
     print("\n" + "=" * 60)
     print("MOVING AVERAGES")
     print("=" * 60)
 
     moving_averages = result.moving_averages
 
-    if moving_averages.sma_20 is not None:
+    for name, value in [
+        ("SMA 20", moving_averages.sma_20),
+        ("SMA 50", moving_averages.sma_50),
+        ("SMA 200", moving_averages.sma_200),
+        ("EMA 20", moving_averages.ema_20),
+        ("EMA 50", moving_averages.ema_50),
+    ]:
 
-        print(
-            f"SMA 20: "
-            f"{currency_symbol}"
-            f"{moving_averages.sma_20:,.2f}"
-        )
+        if value is not None:
 
-    else:
+            print(
+                f"{name}: "
+                f"{currency_symbol}"
+                f"{value:,.2f}"
+            )
 
-        print(
-            "SMA 20: Not available"
-        )
+        else:
 
-    if moving_averages.sma_50 is not None:
-
-        print(
-            f"SMA 50: "
-            f"{currency_symbol}"
-            f"{moving_averages.sma_50:,.2f}"
-        )
-
-    else:
-
-        print(
-            "SMA 50: Not available"
-        )
-
-    if moving_averages.sma_200 is not None:
-
-        print(
-            f"SMA 200: "
-            f"{currency_symbol}"
-            f"{moving_averages.sma_200:,.2f}"
-        )
-
-    else:
-
-        print(
-            "SMA 200: Not available"
-        )
-
-    if moving_averages.ema_20 is not None:
-
-        print(
-            f"EMA 20: "
-            f"{currency_symbol}"
-            f"{moving_averages.ema_20:,.2f}"
-        )
-
-    else:
-
-        print(
-            "EMA 20: Not available"
-        )
-
-    if moving_averages.ema_50 is not None:
-
-        print(
-            f"EMA 50: "
-            f"{currency_symbol}"
-            f"{moving_averages.ema_50:,.2f}"
-        )
-
-    else:
-
-        print(
-            "EMA 50: Not available"
-        )
-
-    # ========================================================
-    # RSI
-    # ========================================================
+            print(
+                f"{name}: Not available"
+            )
 
     print("\n" + "=" * 60)
     print("RSI")
@@ -454,10 +354,6 @@ def run_technical_agent(
         f"Interpretation: "
         f"{result.rsi.interpretation}"
     )
-
-    # ========================================================
-    # MACD
-    # ========================================================
 
     print("\n" + "=" * 60)
     print("MACD")
@@ -491,10 +387,6 @@ def run_technical_agent(
         f"{result.macd.interpretation}"
     )
 
-    # ========================================================
-    # BOLLINGER BANDS
-    # ========================================================
-
     print("\n" + "=" * 60)
     print("BOLLINGER BANDS")
     print("=" * 60)
@@ -524,13 +416,8 @@ def run_technical_agent(
     else:
 
         print(
-            "Bollinger Bands: "
-            "Not available"
+            "Bollinger Bands: Not available"
         )
-
-    # ========================================================
-    # TREND
-    # ========================================================
 
     print("\n" + "=" * 60)
     print("TREND ANALYSIS")
@@ -540,10 +427,6 @@ def run_technical_agent(
         f"Price Position: "
         f"{result.trend.price_position}"
     )
-
-    # ========================================================
-    # SUPPORT / RESISTANCE
-    # ========================================================
 
     print("\n" + "=" * 60)
     print("SUPPORT / RESISTANCE")
@@ -561,12 +444,6 @@ def run_technical_agent(
             f"{support_resistance.support:,.2f}"
         )
 
-    else:
-
-        print(
-            "Support: Not available"
-        )
-
     if support_resistance.resistance is not None:
 
         print(
@@ -575,20 +452,10 @@ def run_technical_agent(
             f"{support_resistance.resistance:,.2f}"
         )
 
-    else:
-
-        print(
-            "Resistance: Not available"
-        )
-
     print(
         f"Current Position: "
         f"{support_resistance.position}"
     )
-
-    # ========================================================
-    # OVERALL TECHNICAL SIGNAL
-    # ========================================================
 
     print("\n" + "=" * 60)
     print("OVERALL TECHNICAL SIGNAL")
@@ -612,10 +479,6 @@ def run_technical_agent(
 def run_news_agent(
     user_input: str,
 ):
-    """
-    Run the News Agent and display
-    human-readable financial news.
-    """
 
     print("\nFetching recent financial news...")
 
@@ -635,10 +498,6 @@ def run_news_agent(
 
         return
 
-    # ========================================================
-    # COMPANY
-    # ========================================================
-
     print("\n" + "=" * 60)
     print("NEWS AGENT — COMPANY")
     print("=" * 60)
@@ -655,10 +514,6 @@ def run_news_agent(
         f"Exchange: {result.exchange}"
     )
 
-    # ========================================================
-    # NEWS SUMMARY
-    # ========================================================
-
     print("\n" + "=" * 60)
     print("NEWS SUMMARY")
     print("=" * 60)
@@ -673,15 +528,11 @@ def run_news_agent(
         f"{result.analysis_window_hours} hours"
     )
 
-    # ========================================================
-    # SENTIMENT
-    # ========================================================
+    sentiment = result.sentiment
 
     print("\n" + "=" * 60)
     print("NEWS SENTIMENT")
     print("=" * 60)
-
-    sentiment = result.sentiment
 
     print(
         f"Overall Sentiment: "
@@ -727,10 +578,6 @@ def run_news_agent(
             f"Average Sentiment Score: "
             f"{sentiment.average_sentiment_score:.4f}"
         )
-
-    # ========================================================
-    # RECENT ARTICLES
-    # ========================================================
 
     print("\n" + "=" * 60)
     print("RECENT NEWS")
@@ -789,6 +636,268 @@ def run_news_agent(
 
 
 # ============================================================
+# RISK AGENT
+# ============================================================
+
+def run_risk_agent(
+    user_input: str,
+    period: str,
+):
+
+    print("\nCalculating risk metrics...")
+
+    try:
+
+        result = risk_agent(
+            user_input=user_input,
+            period=period,
+        )
+
+    except Exception as error:
+
+        print(
+            f"\nRisk Agent Error: {error}"
+        )
+
+        return
+
+    risk = result.risk_metrics
+
+    classification = (
+        result.classification
+    )
+
+    print("\n" + "=" * 60)
+    print("RISK AGENT — STOCK INFORMATION")
+    print("=" * 60)
+
+    print(
+        f"Company: "
+        f"{result.company_name}"
+    )
+
+    print(
+        f"Symbol: "
+        f"{result.symbol}"
+    )
+
+    print(
+        f"Exchange: "
+        f"{result.exchange}"
+    )
+
+    print(
+        f"Analysis Period: "
+        f"{result.analysis_period}"
+    )
+
+    print(
+        f"Data Points: "
+        f"{result.data_points}"
+    )
+
+    # ========================================================
+    # RISK CLASSIFICATION
+    # ========================================================
+
+    print("\n" + "=" * 60)
+    print("RISK CLASSIFICATION")
+    print("=" * 60)
+
+    print(
+        f"Risk Level: "
+        f"{classification.level}"
+    )
+
+    if classification.score is not None:
+
+        print(
+            f"Risk Score: "
+            f"{classification.score:.2f}/100"
+        )
+
+    print(
+        f"\n{classification.explanation}"
+    )
+
+    # ========================================================
+    # VOLATILITY
+    # ========================================================
+
+    print("\n" + "=" * 60)
+    print("VOLATILITY & DOWNSIDE RISK")
+    print("=" * 60)
+
+    if risk.annualized_volatility is not None:
+
+        print(
+            f"Annualized Volatility: "
+            f"{risk.annualized_volatility * 100:.2f}%"
+        )
+
+    else:
+
+        print(
+            "Annualized Volatility: "
+            "Not available"
+        )
+
+    if risk.downside_volatility is not None:
+
+        print(
+            f"Downside Volatility: "
+            f"{risk.downside_volatility * 100:.2f}%"
+        )
+
+    else:
+
+        print(
+            "Downside Volatility: "
+            "Not available"
+        )
+
+    if risk.maximum_drawdown is not None:
+
+        print(
+            f"Maximum Drawdown: "
+            f"{risk.maximum_drawdown * 100:.2f}%"
+        )
+
+    else:
+
+        print(
+            "Maximum Drawdown: "
+            "Not available"
+        )
+
+    # ========================================================
+    # VALUE AT RISK
+    # ========================================================
+
+    print("\n" + "=" * 60)
+    print("VALUE AT RISK")
+    print("=" * 60)
+
+    if risk.value_at_risk_95 is not None:
+
+        print(
+            f"95% VaR: "
+            f"{risk.value_at_risk_95 * 100:.2f}%"
+        )
+
+    else:
+
+        print(
+            "95% VaR: Not available"
+        )
+
+    if risk.value_at_risk_99 is not None:
+
+        print(
+            f"99% VaR: "
+            f"{risk.value_at_risk_99 * 100:.2f}%"
+        )
+
+    else:
+
+        print(
+            "99% VaR: Not available"
+        )
+
+    if risk.conditional_var_95 is not None:
+
+        print(
+            f"95% CVaR: "
+            f"{risk.conditional_var_95 * 100:.2f}%"
+        )
+
+    else:
+
+        print(
+            "95% CVaR: Not available"
+        )
+
+    if risk.conditional_var_99 is not None:
+
+        print(
+            f"99% CVaR: "
+            f"{risk.conditional_var_99 * 100:.2f}%"
+        )
+
+    else:
+
+        print(
+            "99% CVaR: Not available"
+        )
+
+    # ========================================================
+    # RISK-ADJUSTED PERFORMANCE
+    # ========================================================
+
+    print("\n" + "=" * 60)
+    print("RISK-ADJUSTED PERFORMANCE")
+    print("=" * 60)
+
+    if risk.sharpe_ratio is not None:
+
+        print(
+            f"Sharpe Ratio: "
+            f"{risk.sharpe_ratio:.2f}"
+        )
+
+    else:
+
+        print(
+            "Sharpe Ratio: Not available"
+        )
+
+    if risk.sortino_ratio is not None:
+
+        print(
+            f"Sortino Ratio: "
+            f"{risk.sortino_ratio:.2f}"
+        )
+
+    else:
+
+        print(
+            "Sortino Ratio: Not available"
+        )
+
+    # ========================================================
+    # KEY RISKS
+    # ========================================================
+
+    print("\n" + "=" * 60)
+    print("KEY HISTORICAL RISKS")
+    print("=" * 60)
+
+    for risk_item in result.key_risks:
+
+        print(
+            f"• {risk_item}"
+        )
+
+    # ========================================================
+    # SUMMARY
+    # ========================================================
+
+    print("\n" + "=" * 60)
+    print("RISK SUMMARY")
+    print("=" * 60)
+
+    print(
+        result.risk_summary
+    )
+
+    print(
+        "\nNote: Risk measurements are "
+        "historical, rule-based indicators "
+        "and are not financial advice."
+    )
+
+
+# ============================================================
 # MAIN
 # ============================================================
 
@@ -798,21 +907,23 @@ def main():
     print("FINANCIAL MARKET INTELLIGENCE")
     print("=" * 60)
 
-    # ========================================================
-    # AGENT SELECTION
-    # ========================================================
-
     print("\nSelect an agent:")
 
     print("1. Data Agent")
     print("2. Technical Agent")
     print("3. News Agent")
+    print("4. Risk Agent")
 
     agent_choice = input(
-        "\nEnter your choice (1-3): "
+        "\nEnter your choice (1-4): "
     ).strip()
 
-    if agent_choice not in ["1", "2", "3"]:
+    if agent_choice not in [
+        "1",
+        "2",
+        "3",
+        "4",
+    ]:
 
         print(
             "\nInvalid agent choice."
@@ -821,7 +932,7 @@ def main():
         return
 
     # ========================================================
-    # USER STOCK INPUT
+    # STOCK INPUT
     # ========================================================
 
     user_input = input(
@@ -838,47 +949,58 @@ def main():
         return
 
     # ========================================================
-    # DATA / TECHNICAL AGENTS
-    # ========================================================
-
-    if agent_choice in ["1", "2"]:
-
-        period = get_period()
-
-        if period is None:
-
-            return
-
-        # ----------------------------------------------------
-        # DATA AGENT
-        # ----------------------------------------------------
-
-        if agent_choice == "1":
-
-            run_data_agent(
-                user_input=user_input,
-                period=period,
-            )
-
-        # ----------------------------------------------------
-        # TECHNICAL AGENT
-        # ----------------------------------------------------
-
-        elif agent_choice == "2":
-
-            run_technical_agent(
-                user_input=user_input,
-                period=period,
-            )
-
-    # ========================================================
     # NEWS AGENT
     # ========================================================
 
-    elif agent_choice == "3":
+    if agent_choice == "3":
 
         run_news_agent(
             user_input=user_input,
+        )
+
+        return
+
+    # ========================================================
+    # PERIOD FOR DATA / TECHNICAL / RISK
+    # ========================================================
+
+    period = get_period()
+
+    if period is None:
+
+        return
+
+    # ========================================================
+    # DATA AGENT
+    # ========================================================
+
+    if agent_choice == "1":
+
+        run_data_agent(
+            user_input=user_input,
+            period=period,
+        )
+
+    # ========================================================
+    # TECHNICAL AGENT
+    # ========================================================
+
+    elif agent_choice == "2":
+
+        run_technical_agent(
+            user_input=user_input,
+            period=period,
+        )
+
+    # ========================================================
+    # RISK AGENT
+    # ========================================================
+
+    elif agent_choice == "4":
+
+        run_risk_agent(
+            user_input=user_input,
+            period=period,
         )
 
 
