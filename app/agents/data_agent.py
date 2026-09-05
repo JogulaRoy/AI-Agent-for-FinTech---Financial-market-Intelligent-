@@ -1,485 +1,193 @@
-from app.agents.stock_resolver import resolve_stock
+"""
+Data Agent.
 
-from app.tools.market_data import fetch_market_data
+The foundation of the system. It turns a canonical security into accurate,
+structured, provenance-tagged market data + fundamentals + a transparent
+financial-health score. It performs no interpretation or advice.
+"""
 
+from __future__ import annotations
+
+from typing import Optional
+
+from app.analysis.fundamentals import assess_financial_health
+from app.data.normalizer import price_history_to_frame
+from app.data.provider_manager import ProviderManager, get_provider_manager
+from app.data.resolver import resolve_security
+from app.data.validator import validate_price_history
+from app.schemas.fundamentals import Fundamentals
+from app.schemas.market_data import (
+    CompanyProfile,
+    DataAgentResult,
+    DataQualityReport,
+    PerformanceMetrics,
+    PriceHistory,
+    Quote,
+    StabilityMetrics,
+)
+from app.schemas.security import CanonicalSecurity
 from app.tools.market_metrics import (
-    calculate_daily_return,
-    calculate_monthly_return,
-    calculate_six_month_return,
-    calculate_one_year_return,
     calculate_annualized_volatility,
-    calculate_downside_volatility,
-    calculate_maximum_drawdown,
-    calculate_positive_days_ratio,
-    calculate_negative_days_ratio,
     calculate_average_daily_return,
     calculate_best_day,
+    calculate_daily_return,
+    calculate_downside_volatility,
+    calculate_maximum_drawdown,
+    calculate_monthly_return,
+    calculate_negative_days_ratio,
+    calculate_one_year_return,
+    calculate_positive_days_ratio,
+    calculate_six_month_return,
     calculate_worst_day,
     classify_stability,
 )
 
-from app.schemas.market_data import (
-    StockInfo,
-    PriceInfo,
-    HistoricalPrice,
-    PerformanceMetrics,
-    StabilityMetrics,
-    DataQuality,
-    MarketData,
-)
 
+class DataAgentError(RuntimeError):
+    pass
 
-# ============================================================
-# DATA AGENT
-# ============================================================
 
-def data_agent(
-    user_input: str,
-    period: str = "1y",
-) -> MarketData:
-    """
-    Data Agent
+def run_data_agent(
+    security_or_query: CanonicalSecurity | str,
+    period: str = "5y",
+    manager: Optional[ProviderManager] = None,
+) -> DataAgentResult:
+    manager = manager or get_provider_manager()
 
-    Responsibilities:
-
-    1. Resolve the user's stock dynamically.
-    2. Prefer Indian NSE/BSE equities when applicable.
-    3. Determine the correct Yahoo Finance symbol.
-    4. Fetch historical market data.
-    5. Validate and clean market data.
-    6. Identify latest price and currency.
-    7. Convert history into structured records.
-    8. Calculate performance metrics.
-    9. Calculate stability metrics.
-    10. Report data quality.
-    11. Return structured Pydantic data.
-
-    The Data Agent does NOT:
-
-        - make investment decisions
-        - provide financial advice
-        - analyze news
-        - perform sentiment analysis
-        - calculate technical indicators
-        - perform portfolio risk decisions
-    """
-
-    # ========================================================
-    # 1. VALIDATE USER INPUT
-    # ========================================================
-
-    if not user_input or not user_input.strip():
-
-        raise ValueError(
-            "Stock name or symbol cannot be empty."
-        )
-
-    user_input = user_input.strip()
-
-    # ========================================================
-    # 2. RESOLVE STOCK
-    # ========================================================
-    #
-    # Example:
-    #
-    # SBI
-    # ↓
-    # NSE Security Master
-    # ↓
-    # State Bank of India
-    # ↓
-    # SBIN
-    # ↓
-    # SBIN.NS
-    #
-    # Apple
-    # ↓
-    # International resolver
-    # ↓
-    # AAPL
-    #
-    # ========================================================
-
-    stock = resolve_stock(
-        user_input
-    )
-
-    # ========================================================
-    # 3. DETERMINE DATA SYMBOL
-    # ========================================================
-    #
-    # THIS IS THE CRITICAL FIX.
-    #
-    # For Indian stocks:
-    #
-    # stock["symbol"]      = SBIN
-    # stock["yahoo_symbol"] = SBIN.NS
-    #
-    # We use yahoo_symbol for fetching.
-    #
-    # For international stocks:
-    #
-    # stock["symbol"] = AAPL
-    #
-    # No yahoo_symbol is required.
-    #
-    # ========================================================
-
-    data_symbol = stock.get(
-        "yahoo_symbol"
-    )
-
-    if not data_symbol:
-
-        data_symbol = stock["symbol"]
-
-    # ========================================================
-    # 4. FETCH MARKET DATA
-    # ========================================================
-
-    market_data = fetch_market_data(
-        symbol=data_symbol,
-        period=period,
-        interval="1d",
-    )
-
-    history = market_data["history"]
-
-    # ========================================================
-    # 5. SAFETY CHECK
-    # ========================================================
-
-    if history is None or history.empty:
-
-        raise ValueError(
-            f"No historical market data available "
-            f"for {stock['name']} "
-            f"({data_symbol})."
-        )
-
-    # ========================================================
-    # 6. CURRENCY
-    # ========================================================
-
-    currency_code = (
-        market_data[
-            "currency"
-        ][
-            "code"
-        ]
-    )
-
-    currency_symbol = (
-        market_data[
-            "currency"
-        ][
-            "symbol"
-        ]
-    )
-
-    # ========================================================
-    # 7. STOCK INFORMATION
-    # ========================================================
-    #
-    # IMPORTANT:
-    #
-    # Display the user's actual market identity:
-    #
-    # State Bank of India
-    # SBIN
-    # NSE
-    # INR
-    #
-    # Do NOT display SBIN.NS as the stock's public symbol.
-    #
-    # SBIN.NS is only the Yahoo Finance data symbol.
-    #
-    # ========================================================
-
-    stock_info = StockInfo(
-        name=stock["name"],
-        symbol=stock["symbol"],
-        exchange=stock["exchange"],
-        currency=currency_code,
-    )
-
-    # ========================================================
-    # 8. LATEST PRICE
-    # ========================================================
-
-    latest_price = float(
-        market_data[
-            "latest_price"
-        ]
-    )
-
-    price_info = PriceInfo(
-        value=latest_price,
-        currency=currency_code,
-        symbol=currency_symbol,
-    )
-
-    # ========================================================
-    # 9. CONVERT HISTORY
-    # ========================================================
-
-    historical_data = []
-
-    for date, row in history.iterrows():
-
-        # ----------------------------------------------------
-        # Volume safety
-        # ----------------------------------------------------
-
-        volume = row.get(
-            "Volume",
-            0,
-        )
-
-        if volume is None:
-
-            volume = 0
-
-        try:
-
-            volume = int(
-                volume
-            )
-
-        except (
-            TypeError,
-            ValueError,
-        ):
-
-            volume = 0
-
-        # ----------------------------------------------------
-        # Create structured record
-        # ----------------------------------------------------
-
-        historical_data.append(
-            HistoricalPrice(
-
-                date=date.strftime(
-                    "%Y-%m-%d"
-                ),
-
-                open=float(
-                    row["Open"]
-                ),
-
-                high=float(
-                    row["High"]
-                ),
-
-                low=float(
-                    row["Low"]
-                ),
-
-                close=float(
-                    row["Close"]
-                ),
-
-                volume=volume,
-            )
-        )
-
-    # ========================================================
-    # 10. PERFORMANCE METRICS
-    # ========================================================
-
-    daily_return = (
-        calculate_daily_return(
-            history
-        )
-    )
-
-    monthly_return = (
-        calculate_monthly_return(
-            history
-        )
-    )
-
-    six_month_return = (
-        calculate_six_month_return(
-            history
-        )
-    )
-
-    one_year_return = (
-        calculate_one_year_return(
-            history
-        )
-    )
-
-    performance = PerformanceMetrics(
-
-        daily_return=daily_return,
-
-        monthly_return=monthly_return,
-
-        six_month_return=six_month_return,
-
-        one_year_return=one_year_return,
-    )
-
-    # ========================================================
-    # 11. STABILITY METRICS
-    # ========================================================
-
-    annualized_volatility = (
-        calculate_annualized_volatility(
-            history
-        )
-    )
-
-    downside_volatility = (
-        calculate_downside_volatility(
-            history
-        )
-    )
-
-    maximum_drawdown = (
-        calculate_maximum_drawdown(
-            history
-        )
-    )
-
-    positive_days_ratio = (
-        calculate_positive_days_ratio(
-            history
-        )
-    )
-
-    negative_days_ratio = (
-        calculate_negative_days_ratio(
-            history
-        )
-    )
-
-    average_daily_return = (
-        calculate_average_daily_return(
-            history
-        )
-    )
-
-    best_day = calculate_best_day(
-        history
-    )
-
-    worst_day = calculate_worst_day(
-        history
-    )
-
-    stability_classification = (
-        classify_stability(
-            annualized_volatility,
-            maximum_drawdown,
-        )
-    )
-
-    stability = StabilityMetrics(
-
-        annualized_volatility=(
-            annualized_volatility
-        ),
-
-        downside_volatility=(
-            downside_volatility
-        ),
-
-        maximum_drawdown=(
-            maximum_drawdown
-        ),
-
-        positive_days_ratio=(
-            positive_days_ratio
-        ),
-
-        negative_days_ratio=(
-            negative_days_ratio
-        ),
-
-        average_daily_return=(
-            average_daily_return
-        ),
-
-        best_day=best_day,
-
-        worst_day=worst_day,
-
-        classification=(
-            stability_classification
-        ),
-    )
-
-    # ========================================================
-    # 12. DATA QUALITY
-    # ========================================================
-
-    quality = market_data.get(
-        "data_quality"
-    )
-
-    if quality is None:
-
-        data_quality = DataQuality(
-
-            rows_returned=len(
-                history
-            ),
-
-            rows_removed=0,
-
-            start_date=(
-                history.index[0]
-                .strftime("%Y-%m-%d")
-            ),
-
-            end_date=(
-                history.index[-1]
-                .strftime("%Y-%m-%d")
-            ),
-        )
-
+    if isinstance(security_or_query, str):
+        security = resolve_security(security_or_query, manager)
     else:
+        security = security_or_query
 
-        data_quality = DataQuality(
+    warnings: list[str] = []
+    sources: set[str] = set()
 
-            rows_returned=quality[
-                "rows_returned"
-            ],
-
-            rows_removed=quality[
-                "rows_removed"
-            ],
-
-            start_date=quality[
-                "start_date"
-            ],
-
-            end_date=quality[
-                "end_date"
-            ],
+    # --- history (required) ---------------------------------------
+    hist_outcome = manager.get_history(security, period)
+    if not hist_outcome.ok:
+        raise DataAgentError(
+            f"No historical price data for {security.company_name} "
+            f"({security.symbol}). Tried: {', '.join(hist_outcome.attempts)}"
+        )
+    history: PriceHistory = hist_outcome.value  # type: ignore[assignment]
+    sources.add(hist_outcome.provider or "")
+    history, quality = validate_price_history(history)
+    if not quality.passed:
+        raise DataAgentError(
+            f"Historical data for {security.symbol} failed validation: {quality.issues}"
+        )
+    if quality.rows_removed:
+        warnings.append(
+            f"{quality.rows_removed} price row(s) removed during validation."
         )
 
-    # ========================================================
-    # 13. RETURN COMPLETE DATA AGENT RESULT
-    # ========================================================
+    frame = price_history_to_frame(history)
 
-    return MarketData(
+    # --- quote (best effort) -------------------------------------
+    quote_outcome = manager.get_quote(security)
+    if quote_outcome.ok:
+        quote: Quote = quote_outcome.value  # type: ignore[assignment]
+        sources.add(quote_outcome.provider or "")
+    else:
+        last = history.bars[-1]
+        prev = history.bars[-2].close if len(history.bars) > 1 else None
+        quote = Quote(
+            price=last.close, open=last.open, high=last.high, low=last.low,
+            close=last.close, previous_close=prev,
+            change=(last.close - prev) if prev else None,
+            change_percent=((last.close - prev) / prev) if prev else None,
+            volume=last.volume, currency=security.currency, timestamp=last.date,
+        )
+        warnings.append("Live quote unavailable; using latest close from history.")
+    if not quote.currency:
+        quote.currency = security.currency
 
-        stock=stock_info,
+    # --- profile (best effort) ----------------------------------
+    profile_outcome = manager.get_profile(security)
+    if profile_outcome.ok:
+        profile: CompanyProfile = profile_outcome.value  # type: ignore[assignment]
+        sources.add(profile_outcome.provider or "")
+    else:
+        profile = CompanyProfile(
+            company_name=security.company_name,
+            symbol=security.symbol,
+            exchange=security.exchange,
+            country=security.country,
+            currency=security.currency,
+            isin=security.isin,
+        )
+        warnings.append("Detailed company profile unavailable from the configured providers.")
+    # fill identity gaps from the canonical security
+    profile.isin = profile.isin or security.isin
+    profile.country = profile.country or security.country
+    profile.currency = profile.currency or security.currency or quote.currency
 
-        price=price_info,
+    # --- fundamentals (best effort) ---------------------------
+    fundamentals = _load_fundamentals(security, manager, sources, warnings)
 
-        requested_period=period,
-
-        historical_data=historical_data,
-
-        performance=performance,
-
-        stability=stability,
-
-        data_quality=data_quality,
+    # --- derived metrics --------------------------------------
+    performance = PerformanceMetrics(
+        daily_return=calculate_daily_return(frame),
+        monthly_return=calculate_monthly_return(frame),
+        six_month_return=calculate_six_month_return(frame),
+        one_year_return=calculate_one_year_return(frame),
     )
+    ann_vol = calculate_annualized_volatility(frame)
+    max_dd = calculate_maximum_drawdown(frame)
+    stability = StabilityMetrics(
+        annualized_volatility=ann_vol,
+        downside_volatility=calculate_downside_volatility(frame),
+        maximum_drawdown=max_dd,
+        positive_days_ratio=calculate_positive_days_ratio(frame),
+        negative_days_ratio=calculate_negative_days_ratio(frame),
+        average_daily_return=calculate_average_daily_return(frame),
+        best_day=calculate_best_day(frame),
+        worst_day=calculate_worst_day(frame),
+        classification=classify_stability(ann_vol, max_dd),
+    )
+
+    # financial health uses fundamentals + price stability together
+    fundamentals.health = assess_financial_health(
+        fundamentals, annualized_volatility=ann_vol, maximum_drawdown=max_dd
+    )
+
+    quality = DataQualityReport(**{
+        **quality.model_dump(),
+        "issues": quality.issues + (
+            ["52-week high/low missing"] if quote.week52_high is None else []
+        ),
+    })
+
+    return DataAgentResult(
+        profile=profile,
+        quote=quote,
+        history=history,
+        fundamentals=fundamentals,
+        performance=performance,
+        stability=stability,
+        data_quality=quality,
+        requested_period=period,
+        sources_used=sorted(s for s in sources if s),
+        warnings=warnings,
+    )
+
+
+def _load_fundamentals(
+    security: CanonicalSecurity,
+    manager: ProviderManager,
+    sources: set[str],
+    warnings: list[str],
+) -> Fundamentals:
+    outcome = manager.get_fundamentals(security)
+    if outcome.ok:
+        fundamentals: Fundamentals = outcome.value  # type: ignore[assignment]
+        sources.add(outcome.provider or "")
+        return fundamentals
+
+    reason = "Fundamental statements are not available for this security on the "
+    if security.is_indian:
+        reason += "free API tier (Indian equities need a paid data plan)."
+    else:
+        reason += "configured providers/plan."
+    warnings.append(reason)
+    return Fundamentals(available=False, unavailable_reason=reason)

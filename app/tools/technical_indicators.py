@@ -138,45 +138,69 @@ def calculate_rsi(
     if len(history) < period + 1:
         return None
 
-    delta = history["Close"].diff()
+    delta = history["Close"].diff().dropna()
 
-    gains = delta.clip(
-        lower=0
-    )
+    gains = delta.clip(lower=0).to_numpy(dtype=float)
+    losses = (-delta.clip(upper=0)).to_numpy(dtype=float)
 
-    losses = -delta.clip(
-        upper=0
-    )
+    if len(gains) < period:
+        return None
 
-    average_gain = (
-        gains
-        .rolling(window=period)
-        .mean()
-    )
+    # Wilder's method: seed the averages with the simple mean of the first
+    # `period` changes, then apply the recursive 1/period smoothing.
+    average_gain = gains[:period].mean()
+    average_loss = losses[:period].mean()
 
-    average_loss = (
-        losses
-        .rolling(window=period)
-        .mean()
-    )
+    for i in range(period, len(gains)):
+        average_gain = (average_gain * (period - 1) + gains[i]) / period
+        average_loss = (average_loss * (period - 1) + losses[i]) / period
 
-    if average_loss.iloc[-1] == 0:
+    if average_loss == 0:
+        return 100.0 if average_gain > 0 else 50.0
 
-        if average_gain.iloc[-1] > 0:
-            return 100.0
+    rs = average_gain / average_loss
+    return float(100 - (100 / (1 + rs)))
 
-        return 50.0
 
-    rs = (
-        average_gain.iloc[-1]
-        / average_loss.iloc[-1]
-    )
+# ============================================================
+# AVERAGE TRUE RANGE (Wilder)
+# ============================================================
 
-    rsi = 100 - (
-        100 / (1 + rs)
-    )
 
-    return float(rsi)
+def calculate_atr(
+    history: pd.DataFrame,
+    period: int = 14,
+) -> float | None:
+    """Latest Average True Range using Wilder smoothing."""
+
+    history = validate_history(history)
+
+    for column in ("High", "Low", "Close"):
+        if column not in history.columns:
+            return None
+
+    if len(history) < period + 1:
+        return None
+
+    high = history["High"]
+    low = history["Low"]
+    prev_close = history["Close"].shift(1)
+
+    true_range = pd.concat(
+        [
+            (high - low).abs(),
+            (high - prev_close).abs(),
+            (low - prev_close).abs(),
+        ],
+        axis=1,
+    ).max(axis=1).dropna()
+
+    atr = true_range.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
+
+    latest = atr.iloc[-1]
+    if pd.isna(latest):
+        return None
+    return float(latest)
 
 
 # ============================================================

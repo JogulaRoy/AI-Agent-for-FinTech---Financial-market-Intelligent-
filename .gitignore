@@ -8,9 +8,13 @@ env/
 
 .env
 .env.*
+!.env.example
 
 .cache/
 *.log
+*.sqlite
+*.sqlite3
+data_cache.db
 
 .vscode/
 .idea/

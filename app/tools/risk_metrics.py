@@ -261,7 +261,7 @@ def calculate_sharpe_ratio(
         excess_returns.std()
     )
 
-    if standard_deviation == 0:
+    if standard_deviation is None or not np.isfinite(standard_deviation) or standard_deviation < 1e-12:
 
         return None
 
@@ -326,6 +326,41 @@ def calculate_sortino_ratio(
     )
 
     return float(sortino)
+
+
+# ============================================================
+# BETA
+# ============================================================
+
+def calculate_beta(
+    asset_returns: pd.Series,
+    benchmark_returns: pd.Series,
+) -> float | None:
+    """
+    Beta = Cov(asset, benchmark) / Var(benchmark), computed on the overlapping
+    daily-return dates. Returns None when there is not enough shared history.
+    """
+
+    if asset_returns is None or benchmark_returns is None:
+        return None
+
+    joined = pd.concat(
+        [asset_returns.rename("asset"), benchmark_returns.rename("benchmark")],
+        axis=1,
+        join="inner",
+    ).dropna()
+
+    if len(joined) < 30:
+        return None
+
+    benchmark_variance = joined["benchmark"].var()
+
+    if benchmark_variance in (0, None) or pd.isna(benchmark_variance):
+        return None
+
+    covariance = joined["asset"].cov(joined["benchmark"])
+
+    return float(covariance / benchmark_variance)
 
 
 # ============================================================

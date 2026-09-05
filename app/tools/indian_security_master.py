@@ -395,15 +395,15 @@ def search_indian_equity(
 
             if extra_length <= 1:
 
-                score += 1000
+                score += 4000
 
             elif extra_length <= 3:
 
-                score += 500
+                score += 1500
 
             elif extra_length <= 6:
 
-                score += 200
+                score += 500
 
         if score > 0:
 

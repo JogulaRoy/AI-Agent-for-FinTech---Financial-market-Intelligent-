@@ -1,325 +1,163 @@
-from app.agents.stock_resolver import resolve_stock
-from app.tools.news_data import fetch_news
+"""
+News Agent.
 
-from app.schemas.news_data import (
-    NewsAnalysis,
-    NewsArticle,
-    NewsSentiment,
-)
+Retrieves recent company news through the same provider layer the Data Agent
+uses (EODHD primary, yfinance fallback), de-duplicates, and runs a lightweight
+lexical sentiment pass. Provider-supplied sentiment and our computed sentiment
+are kept as separate fields — one is never presented as the other.
+"""
+
+from __future__ import annotations
+
+import re
+from collections import Counter
+from datetime import datetime, timezone
+
+from app.data.provider_manager import ProviderManager, get_provider_manager
+from app.schemas.common import DataProvenance
+from app.schemas.news_data import NewsAnalysis, NewsArticle, NewsSentiment
+from app.schemas.security import CanonicalSecurity
+
+_POSITIVE = {
+    "beat", "beats", "surge", "surged", "jump", "jumps", "gain", "gains", "rise",
+    "rises", "rally", "record", "profit", "growth", "upgrade", "upgraded", "strong",
+    "outperform", "bullish", "positive", "boost", "expansion", "wins", "win",
+    "approval", "approved", "raises", "raised", "soar", "soared", "high", "top",
+}
+_NEGATIVE = {
+    "miss", "misses", "missed", "fall", "falls", "drop", "drops", "plunge",
+    "plunged", "loss", "losses", "decline", "declines", "downgrade", "downgraded",
+    "weak", "bearish", "negative", "cut", "cuts", "lawsuit", "probe", "fraud",
+    "warning", "warns", "slump", "slumped", "layoff", "layoffs", "recall", "fine",
+    "fined", "concern", "concerns", "risk", "slowdown", "low", "sell-off",
+}
+_THEME_KEYWORDS = {
+    "earnings": ["earnings", "revenue", "profit", "quarter", "results", "guidance"],
+    "regulation / legal": ["lawsuit", "regulator", "antitrust", "probe", "court", "fine", "ruling"],
+    "products / launch": ["launch", "unveil", "product", "release", "announce"],
+    "M&A": ["acquire", "acquisition", "merger", "buyout", "deal", "stake"],
+    "leadership": ["ceo", "cfo", "resign", "appoint", "executive", "board"],
+    "analyst view": ["upgrade", "downgrade", "price target", "rating", "analyst"],
+    "macro": ["inflation", "tariff", "interest rate", "fed", "economy", "recession"],
+}
 
 
-# ============================================================
-# NEWS AGENT
-# ============================================================
+def _lexical_sentiment(text: str) -> tuple[str, float]:
+    words = re.findall(r"[a-z\-]+", (text or "").lower())
+    if not words:
+        return "Neutral", 0.0
+    pos = sum(1 for w in words if w in _POSITIVE)
+    neg = sum(1 for w in words if w in _NEGATIVE)
+    if pos == neg:
+        return "Neutral", 0.0
+    score = (pos - neg) / max(1, pos + neg)
+    label = "Positive" if score > 0 else "Negative"
+    return label, round(score, 3)
 
-def news_agent(
-    user_input: str,
+
+def _themes(articles: list[NewsArticle]) -> list[str]:
+    blob = " ".join(f"{a.title} {a.summary}" for a in articles).lower()
+    hits = Counter()
+    for theme, keywords in _THEME_KEYWORDS.items():
+        count = sum(blob.count(k) for k in keywords)
+        if count:
+            hits[theme] = count
+    return [theme for theme, _ in hits.most_common(5)]
+
+
+def _dedupe(articles: list[NewsArticle]) -> list[NewsArticle]:
+    seen: set[str] = set()
+    out: list[NewsArticle] = []
+    for article in articles:
+        key = re.sub(r"[^a-z0-9]", "", article.title.lower())[:80]
+        if key and key in seen:
+            continue
+        seen.add(key)
+        out.append(article)
+    return out
+
+
+def run_news_agent(
+    security: CanonicalSecurity,
     hours: int = 168,
-    limit: int = 20,
+    limit: int = 25,
+    manager: ProviderManager | None = None,
 ) -> NewsAnalysis:
-    """
-    News Agent
-
-    Responsibilities:
-
-    1. Understand the user's stock input.
-    2. Resolve company name/symbol.
-    3. Retrieve recent financial news.
-    4. Extract article information.
-    5. Analyze article sentiment.
-    6. Aggregate overall market sentiment.
-    7. Return structured Pydantic output.
-
-    Args:
-        user_input:
-            Company name or stock symbol.
-
-        hours:
-            Number of previous hours to search.
-
-        limit:
-            Maximum number of articles.
-
-    Returns:
-        NewsAnalysis
-    """
-
-    # ========================================================
-    # 1. RESOLVE STOCK
-    # ========================================================
-
-    stock = resolve_stock(
-        user_input
-    )
-
-    symbol = stock["symbol"]
-
-    # ========================================================
-    # 2. FETCH NEWS
-    # ========================================================
-
-    raw_news = fetch_news(
-        symbol=symbol,
-        hours=hours,
-        limit=limit,
-    )
-
-    # ========================================================
-    # 3. PROCESS ARTICLES
-    # ========================================================
-
-    articles = []
-
-    positive_count = 0
-    negative_count = 0
-    neutral_count = 0
-
-    sentiment_scores = []
-
-    for item in raw_news:
-
-        # ----------------------------------------------------
-        # BASIC ARTICLE INFORMATION
-        # ----------------------------------------------------
-
-        title = item.get(
-            "title",
-            "Unknown title",
-        )
-
-        source = item.get(
-            "source",
-            "Unknown source",
-        )
-
-        published_at = item.get(
-            "time_published",
-            "Unknown",
-        )
-
-        url = item.get(
-            "url",
-            "",
-        )
-
-        summary = item.get(
-            "summary",
-            "",
-        )
-
-        # ----------------------------------------------------
-        # SENTIMENT
-        # ----------------------------------------------------
-
-        sentiment_label = item.get(
-            "overall_sentiment_label"
-        )
-
-        sentiment_score = item.get(
-            "overall_sentiment_score"
-        )
-
-        # ----------------------------------------------------
-        # NORMALIZE SENTIMENT LABEL
-        # ----------------------------------------------------
-
-        if sentiment_label:
-
-            label = sentiment_label.lower()
-
-            if "bullish" in label:
-                normalized_label = "Positive"
-
-            elif "bearish" in label:
-                normalized_label = "Negative"
-
-            else:
-                normalized_label = "Neutral"
-
-        else:
-
-            normalized_label = "Neutral"
-
-        # ----------------------------------------------------
-        # COUNT SENTIMENT
-        # ----------------------------------------------------
-
-        if normalized_label == "Positive":
-
-            positive_count += 1
-
-        elif normalized_label == "Negative":
-
-            negative_count += 1
-
-        else:
-
-            neutral_count += 1
-
-        # ----------------------------------------------------
-        # SENTIMENT SCORE
-        # ----------------------------------------------------
-
-        numeric_score = None
-
-        if sentiment_score is not None:
-
-            try:
-
-                numeric_score = float(
-                    sentiment_score
-                )
-
-                sentiment_scores.append(
-                    numeric_score
-                )
-
-            except (
-                TypeError,
-                ValueError,
-            ):
-
-                numeric_score = None
-
-        # ----------------------------------------------------
-        # CREATE STRUCTURED ARTICLE
-        # ----------------------------------------------------
-
-        article = NewsArticle(
-            title=title,
-            source=source,
-            published_at=published_at,
-            url=url,
-            summary=summary,
-            sentiment_label=normalized_label,
-            sentiment_score=numeric_score,
-        )
-
-        articles.append(
-            article
-        )
-
-    # ========================================================
-    # 4. TOTAL ARTICLES
-    # ========================================================
-
-    total_articles = len(
-        articles
-    )
-
-    # ========================================================
-    # 5. CALCULATE SENTIMENT RATIOS
-    # ========================================================
-
-    if total_articles > 0:
-
-        positive_ratio = (
-            positive_count
-            / total_articles
-        )
-
-        negative_ratio = (
-            negative_count
-            / total_articles
-        )
-
-        neutral_ratio = (
-            neutral_count
-            / total_articles
-        )
-
-    else:
-
-        positive_ratio = 0.0
-        negative_ratio = 0.0
-        neutral_ratio = 0.0
-
-    # ========================================================
-    # 6. DETERMINE OVERALL SENTIMENT
-    # ========================================================
-
-    if total_articles == 0:
-
-        overall_sentiment = (
-            "No Recent News"
-        )
-
-    elif positive_count > negative_count:
-
-        overall_sentiment = "Positive"
-
-    elif negative_count > positive_count:
-
-        overall_sentiment = "Negative"
-
-    else:
-
-        overall_sentiment = "Neutral"
-
-    # ========================================================
-    # 7. AVERAGE SENTIMENT SCORE
-    # ========================================================
-
-    if sentiment_scores:
-
-        average_sentiment_score = (
-            sum(sentiment_scores)
-            / len(sentiment_scores)
-        )
-
-    else:
-
-        average_sentiment_score = None
-
-    # ========================================================
-    # 8. CREATE SENTIMENT OBJECT
-    # ========================================================
-
-    sentiment = NewsSentiment(
-
-        positive_count=positive_count,
-
-        negative_count=negative_count,
-
-        neutral_count=neutral_count,
-
-        total_articles=total_articles,
-
-        positive_ratio=positive_ratio,
-
-        negative_ratio=negative_ratio,
-
-        neutral_ratio=neutral_ratio,
-
-        overall_sentiment=overall_sentiment,
-
-        average_sentiment_score=(
-            average_sentiment_score
-        ),
-    )
-
-    # ========================================================
-    # 9. RETURN COMPLETE NEWS ANALYSIS
-    # ========================================================
-
-    return NewsAnalysis(
-
-        company_name=stock["name"],
-
-        symbol=stock["symbol"],
-
-        exchange=stock["exchange"],
-
-        currency=stock.get(
-            "currency",
-            "USD",
-        ),
-
-        articles=articles,
-
-        sentiment=sentiment,
-
-        articles_analyzed=total_articles,
-
+    manager = manager or get_provider_manager()
+
+    analysis = NewsAnalysis(
+        company_name=security.company_name,
+        symbol=security.symbol,
+        exchange=security.exchange,
+        currency=security.currency,
         analysis_window_hours=hours,
     )
+
+    outcome = manager.get_news(security, hours=hours, limit=limit)
+    raw: list[NewsArticle] = list(outcome.value) if outcome.ok else []
+
+    if not raw:
+        analysis.coverage_note = (
+            "No recent news found through the configured providers. "
+            "Coverage for this market may be limited on the free API tier."
+        )
+        analysis.sentiment.overall_sentiment = "No Recent News"
+        return analysis
+
+    articles = _dedupe(raw)
+
+    pos = neg = neu = 0
+    provider_scores: list[float] = []
+    computed_scores: list[float] = []
+
+    for article in articles:
+        label, score = _lexical_sentiment(f"{article.title}. {article.summary}")
+        article.computed_sentiment_label = label
+        article.computed_sentiment_score = score
+        computed_scores.append(score)
+        if article.provider_sentiment_score is not None:
+            provider_scores.append(article.provider_sentiment_score)
+
+        # Blend: prefer provider sentiment when present, else our lexical pass.
+        effective = article.provider_sentiment_label or label
+        if effective == "Positive":
+            pos += 1
+        elif effective == "Negative":
+            neg += 1
+        else:
+            neu += 1
+
+    total = len(articles)
+    basis = "blended" if provider_scores else "computed"
+    avg_score = None
+    if provider_scores:
+        avg_score = round(sum(provider_scores) / len(provider_scores), 3)
+    elif computed_scores:
+        avg_score = round(sum(computed_scores) / len(computed_scores), 3)
+
+    overall = (
+        "Positive" if pos > neg else "Negative" if neg > pos else "Neutral"
+    )
+
+    analysis.articles = sorted(
+        articles, key=lambda a: a.published_at, reverse=True
+    )
+    analysis.articles_analyzed = total
+    analysis.themes = _themes(articles)
+    analysis.sentiment = NewsSentiment(
+        positive_count=pos, negative_count=neg, neutral_count=neu, total_articles=total,
+        positive_ratio=pos / total, negative_ratio=neg / total, neutral_ratio=neu / total,
+        overall_sentiment=overall, average_sentiment_score=avg_score, sentiment_basis=basis,
+    )
+    analysis.provenance = DataProvenance(
+        provider=outcome.provider or "news",
+        endpoint="news",
+        as_of=datetime.now(timezone.utc).isoformat(),
+        note=(
+            "Provider sentiment shown where available; otherwise a lightweight "
+            "lexical estimate computed by this system."
+        ),
+    )
+    if outcome.provider == "yfinance":
+        analysis.coverage_note = "News retrieved via yfinance fallback."
+    return analysis
